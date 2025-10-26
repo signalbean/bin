@@ -1,0 +1,56 @@
+#!/usr/bin/env node
+
+import { readFileSync, existsSync, readdirSync, statSync, writeFileSync } from 'fs'
+import { resolve, join, relative as _relative, dirname } from 'path'
+
+try {
+  const config = JSON.parse(readFileSync('tsconfig.json', 'utf8'))
+  const { baseUrl, outDir, paths } = config.compilerOptions || {}
+
+  if (!baseUrl || !outDir || !paths) throw 'Missing baseUrl, outDir, or paths'
+
+  const distDir = resolve(outDir)
+  if (!existsSync(distDir)) throw `outDir doesn't exist: ${distDir}`
+
+  const rules = []
+  for (const alias in paths) {
+    const target = paths[alias][0]
+    const cleanAlias = alias.replace('/*', '')
+    const cleanTarget = target.replace('/*', '')
+    rules.push({
+      regex: new RegExp(`(['"\`])${cleanAlias}/([^'"\`]+?)\\1`, 'g'),
+      target: cleanTarget
+    })
+  }
+
+  function processDir(dir) {
+    for (const file of readdirSync(dir)) {
+      const fullPath = join(dir, file)
+      const stat = statSync(fullPath)
+      if (stat.isDirectory()) processDir(fullPath)
+      else if (file.endsWith('.js')) {
+        let content = readFileSync(fullPath, 'utf8')
+        let changed = false
+
+        for (const { regex, target } of rules) {
+          content = content.replace(regex, (match, quote, subPath) => {
+            changed = true
+            const targetPath = join(distDir, target, subPath) + '.js'
+            let relative = _relative(dirname(fullPath), targetPath)
+            relative = relative.replace(/\\/g, '/')
+            if (!relative.startsWith('.')) relative = './' + relative
+            return quote + relative + quote
+          })
+        }
+
+        if (changed) writeFileSync(fullPath, content)
+      }
+    }
+  }
+
+  processDir(distDir)
+  console.log('☕ Build Complete!')
+} catch (e) {
+  console.error('❌', e)
+  process.exit(1)
+}
