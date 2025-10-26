@@ -1,0 +1,53 @@
+#!/usr/bin/env node
+
+import { existsSync, readFileSync, writeFileSync } from 'fs';
+import { execSync } from 'child_process';
+import { createInterface } from 'readline';
+
+const rl = createInterface({
+  input: process.stdin,
+  output: process.stdout
+});
+
+const semverRegex = /\b\d+\.\d+\.\d+\b/g;
+
+const ask = (q) => new Promise(resolve => rl.question(q, resolve));
+
+(async () => {
+  try {
+    const filename = await ask('Filename: ');
+    if (!existsSync(filename)) throw new Error('File not found');
+
+    let content = readFileSync(filename, 'utf8');
+    const versions = content.match(semverRegex);
+    if (!versions) throw new Error('No semver version found');
+
+    console.log(`Current version: ${versions[0]}`);
+    const choice = await ask('Bump: (1) major (2) minor (3) patch: ');
+    const [major, minor, patch] = versions[0].split('.').map(Number);
+
+    const newVersion = {
+      '1': `${major + 1}.0.0`,
+      '2': `${major}.${minor + 1}.0`,
+      '3': `${major}.${minor}.${patch + 1}`
+    }[choice];
+
+    if (!newVersion) throw new Error('Invalid choice');
+
+    content = content.replace(versions[0], newVersion);
+    writeFileSync(filename, content);
+    console.log(`Updated to ${newVersion}`);
+
+    if (existsSync('.git')) {
+      execSync(`git add ${filename}`);
+      execSync(`git commit -m "chore(package): bump version to ${newVersion}"`);
+      execSync(`git tag -a v${newVersion} -m "Release v${newVersion}"`);
+      execSync('git push && git push --tags');
+      console.log('Committed and pushed with tag');
+    }
+  } catch (err) {
+    console.error('Error:', err.message);
+  } finally {
+    rl.close();
+  }
+})();
